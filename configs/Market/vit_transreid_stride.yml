@@ -1,18 +1,18 @@
 MODEL:
   PRETRAIN_CHOICE: 'imagenet'
-  PRETRAIN_PATH: '/home/heshuting/.cache/torch/checkpoints/jx_vit_base_p16_224-80ecf9dd.pth'
+  PRETRAIN_PATH: './data/jx_vit_base_p16_224-80ecf9dd.pth'
   METRIC_LOSS_TYPE: 'triplet'
   IF_LABELSMOOTH: 'off'
   IF_WITH_CENTER: 'no'
   NAME: 'transformer'
   NO_MARGIN: True
-  DEVICE_ID: ('5')
+  DEVICE_ID: ('0')
   TRANSFORMER_TYPE: 'vit_base_patch16_224_TransReID'
   STRIDE_SIZE: [12, 12]
   SIE_CAMERA: True
   SIE_COE: 3.0
   JPM: True
-  RE_ARRANGE: True
+  RE_ARRANGE: False
 
 INPUT:
   SIZE_TRAIN: [256, 128]
@@ -25,18 +25,18 @@ INPUT:
 
 DATASETS:
   NAMES: ('market1501')
-  ROOT_DIR: ('../../data')
+  ROOT_DIR: ('./data')
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
-  NUM_INSTANCE: 4
-  NUM_WORKERS: 8
+  NUM_INSTANCE: 1
+  NUM_WORKERS: 1
 
 SOLVER:
   OPTIMIZER_NAME: 'SGD'
   MAX_EPOCHS: 120
   BASE_LR: 0.008
-  IMS_PER_BATCH: 64
+  IMS_PER_BATCH: 8
   WARMUP_METHOD: 'linear'
   LARGE_FC_LR: False
   CHECKPOINT_PERIOD: 120

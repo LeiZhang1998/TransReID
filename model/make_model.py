@@ -212,6 +212,23 @@ class build_transformer(nn.Module):
         print('Loading pretrained model for finetuning from {}'.format(model_path))
 
 
+class YYXBlock(nn.Module):
+    def __init__(self, in_channel):
+        super(YYXBlock, self).__init__()
+        self.linear1 = nn.Linear(in_channel, in_channel//2)
+        self.linear2 = nn.Linear(in_channel, in_channel // 2)
+        self.linear3 = nn.Linear(in_channel // 2, in_channel)
+
+    def forward(self, x1, x2):
+        out = x1
+        x1 = self.linear1(x1)
+        x2 = self.linear1(x2)
+        x = torch.cat((x1, x2), dim=1)
+        x = self.linear3(x)
+        x = torch.cat((out, x), dim=1)
+        return x
+
+
 class build_transformer_local(nn.Module):
     def __init__(self, num_classes, camera_num, view_num, cfg, factory, rearrange):
         super(build_transformer_local, self).__init__()
@@ -304,14 +321,18 @@ class build_transformer_local(nn.Module):
         self.divide_length = cfg.MODEL.DEVIDE_LENGTH
         print('using divide_length size:{}'.format(self.divide_length))
         self.rearrange = rearrange
+        self.yyx1 = YYXBlock(768)
+        self.yyx2 = YYXBlock(768)
+        self.yyx3 = YYXBlock(768)
+        self.yyx4 = YYXBlock(768)
 
     def forward(self, x, label=None, cam_label= None, view_label=None):  # label is unused if self.cos_layer == 'no'
 
         features = self.base(x, cam_label=cam_label, view_label=view_label)
-
+        # 返回vit倒数第二层的输出 [B, 211, 768]
         # global branch
         b1_feat = self.b1(features) # [64, 129, 768]
-        global_feat = b1_feat[:, 0]
+        global_feat = b1_feat[:, 0]     # 进行vit最后一层的transform
 
         # JPM branch
         feature_length = features.size(1) - 1
@@ -320,27 +341,48 @@ class build_transformer_local(nn.Module):
 
         if self.rearrange:
             x = shuffle_unit(features, self.shift_num, self.shuffle_groups)
+            # lf_1
+            b1_local_feat = x[:, :patch_length]
+            b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
+            local_feat_1 = b1_local_feat[:, 0]
+
+            # lf_2
+            b2_local_feat = x[:, patch_length:patch_length*2]
+            b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
+            local_feat_2 = b2_local_feat[:, 0]
+
+            # lf_3
+            b3_local_feat = x[:, patch_length*2:patch_length*3]
+            b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
+            local_feat_3 = b3_local_feat[:, 0]
+
+            # lf_4
+            b4_local_feat = x[:, patch_length*3:patch_length*4]
+            b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
+            local_feat_4 = b4_local_feat[:, 0]
         else:
             x = features[:, 1:]
-        # lf_1
-        b1_local_feat = x[:, :patch_length]
-        b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
-        local_feat_1 = b1_local_feat[:, 0]
+            # lf_1
+            b1_local_feat = self.yyx1(x[:, :patch_length], x[:, patch_length:patch_length * 4])
+            b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
+            local_feat_1 = b1_local_feat[:, 0]
 
-        # lf_2
-        b2_local_feat = x[:, patch_length:patch_length*2]
-        b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
-        local_feat_2 = b2_local_feat[:, 0]
+            # lf_2
+            b2_local_feat = self.yyx2(x[:, patch_length:patch_length * 2],
+                                      torch.cat((x[:, :patch_length], x[:, patch_length * 2:patch_length * 4]), dim=1))
+            b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
+            local_feat_2 = b2_local_feat[:, 0]
 
-        # lf_3
-        b3_local_feat = x[:, patch_length*2:patch_length*3]
-        b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
-        local_feat_3 = b3_local_feat[:, 0]
+            # lf_3
+            b3_local_feat = self.yyx2(x[:, patch_length * 2:patch_length * 3],
+                                      torch.cat((x[:, :patch_length * 2], x[:, patch_length * 3:patch_length * 4]), dim=1))
+            b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
+            local_feat_3 = b3_local_feat[:, 0]
 
-        # lf_4
-        b4_local_feat = x[:, patch_length*3:patch_length*4]
-        b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
-        local_feat_4 = b4_local_feat[:, 0]
+            # lf_4
+            b4_local_feat = self.yyx2(x[:, patch_length * 3:patch_length * 4], x[:, :patch_length * 3])
+            b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
+            local_feat_4 = b4_local_feat[:, 0]
 
         feat = self.bottleneck(global_feat)
 
@@ -402,3 +444,7 @@ def make_model(cfg, num_class, camera_num, view_num):
         model = Backbone(num_class, cfg)
         print('===========building ResNet===========')
     return model
+
+
+if __name__ == '__main__':
+    model = model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num = view_num)
