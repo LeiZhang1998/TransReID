@@ -1,9 +1,13 @@
+import math
+
 import torch
 import torch.nn as nn
 from .backbones.resnet import ResNet, Bottleneck
 import copy
-from .backbones.vit_pytorch import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
+# from .backbones.vit_pytorch import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
+from .backbones.pit import *
 from loss.metric_learning import Arcface, Cosface, AMSoftmax, CircleLoss
+from einops import rearrange
 
 def shuffle_unit(features, shift, group, begin=1):
 
@@ -237,7 +241,7 @@ class build_transformer_local(nn.Module):
         self.cos_layer = cfg.MODEL.COS_LAYER
         self.neck = cfg.MODEL.NECK
         self.neck_feat = cfg.TEST.NECK_FEAT
-        self.in_planes = 768
+        # self.in_planes = 768
 
         print('using Transformer_type: {} as a backbone'.format(cfg.MODEL.TRANSFORMER_TYPE))
 
@@ -251,22 +255,27 @@ class build_transformer_local(nn.Module):
         else:
             view_num = 0
 
-        self.base = factory[cfg.MODEL.TRANSFORMER_TYPE](img_size=cfg.INPUT.SIZE_TRAIN, sie_xishu=cfg.MODEL.SIE_COE, local_feature=cfg.MODEL.JPM, camera=camera_num, view=view_num, stride_size=cfg.MODEL.STRIDE_SIZE, drop_path_rate=cfg.MODEL.DROP_PATH)
+        # self.base = factory[cfg.MODEL.TRANSFORMER_TYPE](img_size=cfg.INPUT.SIZE_TRAIN, sie_xishu=cfg.MODEL.SIE_COE, local_feature=cfg.MODEL.JPM, camera=camera_num, view=view_num, stride_size=cfg.MODEL.STRIDE_SIZE, drop_path_rate=cfg.MODEL.DROP_PATH)
+        self.base = eval(cfg.MODEL.TRANSFORMER_TYPE)(False)
+        # if pretrain_choice == 'imagenet':
+        #     self.base.load_param(model_path)
+        #     print('Loading pretrained ImageNet model......from {}'.format(model_path))
 
-        if pretrain_choice == 'imagenet':
-            self.base.load_param(model_path)
-            print('Loading pretrained ImageNet model......from {}'.format(model_path))
-
-        block = self.base.blocks[-1]
+        block = self.base.transformers[-1]
         layer_norm = self.base.norm
-        self.b1 = nn.Sequential(
-            copy.deepcopy(block),
-            copy.deepcopy(layer_norm)
-        )
-        self.b2 = nn.Sequential(
-            copy.deepcopy(block),
-            copy.deepcopy(layer_norm)
-        )
+        self.in_planes = self.base.head.in_features
+        # self.b1 = nn.Sequential(
+        #     copy.deepcopy(block),
+        #     copy.deepcopy(layer_norm)
+        # )
+        # self.b2 = nn.Sequential(
+        #     copy.deepcopy(block),
+        #     copy.deepcopy(layer_norm)
+        # )
+        self.b1 = copy.deepcopy(block)
+        self.b1_norm = copy.deepcopy(layer_norm)
+        self.b2 = copy.deepcopy(block)
+        self.b2_norm = copy.deepcopy(layer_norm)
 
         self.num_classes = num_classes
         self.ID_LOSS_TYPE = cfg.MODEL.ID_LOSS_TYPE
@@ -328,11 +337,14 @@ class build_transformer_local(nn.Module):
 
     def forward(self, x, label=None, cam_label= None, view_label=None):  # label is unused if self.cos_layer == 'no'
 
-        features = self.base(x, cam_label=cam_label, view_label=view_label)
+        # features = self.base(x, cam_label=cam_label, view_label=view_label)
+        x, cls_token = self.base(x)
+        x_cls = rearrange(x, "b c h w -> b (h w) c")
+        features = torch.cat([cls_token, x_cls], dim=1)
         # 返回vit倒数第二层的输出 [B, 211, 768]
         # global branch
-        b1_feat = self.b1(features) # [64, 129, 768]
-        global_feat = b1_feat[:, 0]     # 进行vit最后一层的transform
+        b1_x, b1_cls_token = self.b1(x, cls_token) # [64, 129, 768]
+        global_feat = self.b1_norm(b1_cls_token)     # 进行vit最后一层的transform
 
         # JPM branch
         feature_length = features.size(1) - 1
@@ -343,23 +355,35 @@ class build_transformer_local(nn.Module):
             x = shuffle_unit(features, self.shift_num, self.shuffle_groups)
             # lf_1
             b1_local_feat = x[:, :patch_length]
-            b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
-            local_feat_1 = b1_local_feat[:, 0]
-
+            h = int(math.sqrt(b1_local_feat.shape[1]))
+            b1_local_feat = rearrange(b1_local_feat, "b (h w) c -> b c h w", h=h, w=h)
+            # b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
+            # local_feat_1 = b1_local_feat[:, 0]
+            _, b1_local_feat = self.b2(b1_local_feat, token)
+            local_feat_1 = self.b2_norm(b1_local_feat)
             # lf_2
             b2_local_feat = x[:, patch_length:patch_length*2]
-            b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
-            local_feat_2 = b2_local_feat[:, 0]
+            b2_local_feat = rearrange(b2_local_feat, "b (h w) c -> b c h w", h=h, w=h)
+            # b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
+            # local_feat_2 = b2_local_feat[:, 0]
+            _, b2_local_feat = self.b2(b2_local_feat, token)
+            local_feat_2 = self.b2_norm(b2_local_feat)
 
             # lf_3
             b3_local_feat = x[:, patch_length*2:patch_length*3]
-            b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
-            local_feat_3 = b3_local_feat[:, 0]
+            b3_local_feat = rearrange(b3_local_feat, "b (h w) c -> b c h w", h=h, w=h)
+            # b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
+            # local_feat_3 = b3_local_feat[:, 0]
+            _, b3_local_feat = self.b2(b3_local_feat, token)
+            local_feat_3 = self.b2_norm(b3_local_feat)
 
             # lf_4
             b4_local_feat = x[:, patch_length*3:patch_length*4]
-            b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
-            local_feat_4 = b4_local_feat[:, 0]
+            b4_local_feat = rearrange(b4_local_feat, "b (h w) c -> b c h w", h=h, w=h)
+            # b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
+            # local_feat_4 = b4_local_feat[:, 0]
+            _, b4_local_feat = self.b2(b4_local_feat, token)
+            local_feat_4 = self.b2_norm(b4_local_feat)
         else:
             x = features[:, 1:]
             # lf_1
@@ -384,12 +408,17 @@ class build_transformer_local(nn.Module):
             b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
             local_feat_4 = b4_local_feat[:, 0]
 
-        feat = self.bottleneck(global_feat)
-
-        local_feat_1_bn = self.bottleneck_1(local_feat_1)
-        local_feat_2_bn = self.bottleneck_2(local_feat_2)
-        local_feat_3_bn = self.bottleneck_3(local_feat_3)
-        local_feat_4_bn = self.bottleneck_4(local_feat_4)
+        # feat = self.bottleneck(global_feat)
+        #
+        # local_feat_1_bn = self.bottleneck_1(local_feat_1)
+        # local_feat_2_bn = self.bottleneck_2(local_feat_2)
+        # local_feat_3_bn = self.bottleneck_3(local_feat_3)
+        # local_feat_4_bn = self.bottleneck_4(local_feat_4)
+        feat = torch.squeeze(global_feat, dim=1)
+        local_feat_1_bn = torch.squeeze(local_feat_1, dim=1)
+        local_feat_2_bn = torch.squeeze(local_feat_2, dim=1)
+        local_feat_3_bn = torch.squeeze(local_feat_3, dim=1)
+        local_feat_4_bn = torch.squeeze(local_feat_4, dim=1)
 
         if self.training:
             if self.ID_LOSS_TYPE in ('arcface', 'cosface', 'amsoftmax', 'circle'):
@@ -425,12 +454,14 @@ class build_transformer_local(nn.Module):
         print('Loading pretrained model for finetuning from {}'.format(model_path))
 
 
-__factory_T_type = {
-    'vit_base_patch16_224_TransReID': vit_base_patch16_224_TransReID,
-    'deit_base_patch16_224_TransReID': vit_base_patch16_224_TransReID,
-    'vit_small_patch16_224_TransReID': vit_small_patch16_224_TransReID,
-    'deit_small_patch16_224_TransReID': deit_small_patch16_224_TransReID
-}
+# __factory_T_type = {
+#     'vit_base_patch16_224_TransReID': vit_base_patch16_224_TransReID,
+#     'deit_base_patch16_224_TransReID': vit_base_patch16_224_TransReID,
+#     'vit_small_patch16_224_TransReID': vit_small_patch16_224_TransReID,
+#     'deit_small_patch16_224_TransReID': deit_small_patch16_224_TransReID
+# }
+__factory_T_type = None
+
 
 def make_model(cfg, num_class, camera_num, view_num):
     if cfg.MODEL.NAME == 'transformer':
@@ -444,7 +475,3 @@ def make_model(cfg, num_class, camera_num, view_num):
         model = Backbone(num_class, cfg)
         print('===========building ResNet===========')
     return model
-
-
-if __name__ == '__main__':
-    model = model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num = view_num)
