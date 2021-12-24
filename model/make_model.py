@@ -224,12 +224,11 @@ class YYXBlock(nn.Module):
         self.linear3 = nn.Linear(in_channel // 2, in_channel)
 
     def forward(self, x1, x2):
-        out = x1
-        x1 = self.linear1(x1)
+        # x1 = self.linear1(x1)
         x2 = self.linear1(x2)
+        # x = torch.cat((x1, x2), dim=1)
+        x2 = self.linear3(x2)
         x = torch.cat((x1, x2), dim=1)
-        x = self.linear3(x)
-        x = torch.cat((out, x), dim=1)
         return x
 
 
