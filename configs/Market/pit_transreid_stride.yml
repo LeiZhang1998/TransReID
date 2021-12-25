@@ -15,8 +15,8 @@ MODEL:
   RE_ARRANGE: True
 
 INPUT:
-  SIZE_TRAIN: [256, 128]
-  SIZE_TEST: [256, 128]
+  SIZE_TRAIN: [224, 224]
+  SIZE_TEST: [224, 224]
   PROB: 0.5 # random horizontal flip
   RE_PROB: 0.5 # random erasing
   PADDING: 10
