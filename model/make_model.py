@@ -344,7 +344,6 @@ class build_transformer_local(nn.Module):
         # global branch
         b1_x, b1_cls_token = self.b1(x, cls_token) # [64, 129, 768]
         global_feat = self.b1_norm(b1_cls_token)     # 进行vit最后一层的transform
-        global_feat = torch.squeeze(global_feat, dim=1)
 
         # JPM branch
         feature_length = features.size(1) - 1
@@ -361,7 +360,6 @@ class build_transformer_local(nn.Module):
             # local_feat_1 = b1_local_feat[:, 0]
             _, b1_local_feat = self.b2(b1_local_feat, token)
             local_feat_1 = self.b2_norm(b1_local_feat)
-            local_feat_1 = torch.squeeze(local_feat_1, dim=1)
             # lf_2
             b2_local_feat = x[:, patch_length:patch_length*2]
             b2_local_feat = rearrange(b2_local_feat, "b (h w) c -> b c h w", h=h, w=h)
@@ -369,7 +367,6 @@ class build_transformer_local(nn.Module):
             # local_feat_2 = b2_local_feat[:, 0]
             _, b2_local_feat = self.b2(b2_local_feat, token)
             local_feat_2 = self.b2_norm(b2_local_feat)
-            local_feat_2 = torch.squeeze(local_feat_2, dim=1)
 
             # lf_3
             b3_local_feat = x[:, patch_length*2:patch_length*3]
@@ -378,7 +375,6 @@ class build_transformer_local(nn.Module):
             # local_feat_3 = b3_local_feat[:, 0]
             _, b3_local_feat = self.b2(b3_local_feat, token)
             local_feat_3 = self.b2_norm(b3_local_feat)
-            local_feat_3 = torch.squeeze(local_feat_3, dim=1)
 
             # lf_4
             b4_local_feat = x[:, patch_length*3:patch_length*4]
@@ -387,7 +383,6 @@ class build_transformer_local(nn.Module):
             # local_feat_4 = b4_local_feat[:, 0]
             _, b4_local_feat = self.b2(b4_local_feat, token)
             local_feat_4 = self.b2_norm(b4_local_feat)
-            local_feat_4 = torch.squeeze(local_feat_4, dim=1)
         else:
             x = features[:, 1:]
             # lf_1

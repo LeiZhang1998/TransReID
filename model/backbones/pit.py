@@ -224,6 +224,7 @@ def pit_b(pretrained, **kwargs):
         **kwargs
     )
     if pretrained:
+        print("pretrained:pit_b")
         state_dict = \
         torch.load('weights/pit_b_820.pth', map_location='cpu')
         model.load_state_dict(state_dict)
@@ -362,7 +363,7 @@ def pit_ti_distilled(pretrained, **kwargs):
 
 
 if __name__ == '__main__':
-    model = pit_b(False)
+    model = pit_b(True)
     print(model.head.in_features)
     # x = torch.randn(1, 3, 224, 224)
     # y = model(x)
