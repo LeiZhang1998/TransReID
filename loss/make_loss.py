@@ -10,10 +10,10 @@ from .triplet_loss import TripletLoss
 from .center_loss import CenterLoss
 
 
-def make_loss(cfg, num_classes):    # modified by gu
+def make_loss(cfg, num_classes, use_gpu=True):    # modified by gu
     sampler = cfg.DATALOADER.SAMPLER
     feat_dim = 2048
-    center_criterion = CenterLoss(num_classes=num_classes, feat_dim=feat_dim, use_gpu=True)  # center loss
+    center_criterion = CenterLoss(num_classes=num_classes, feat_dim=feat_dim, use_gpu=use_gpu)  # center loss
     if 'triplet' in cfg.MODEL.METRIC_LOSS_TYPE:
         if cfg.MODEL.NO_MARGIN:
             triplet = TripletLoss()

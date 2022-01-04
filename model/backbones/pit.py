@@ -224,6 +224,7 @@ def pit_b(pretrained, **kwargs):
         **kwargs
     )
     if pretrained:
+        print("pretrained:pit_b")
         state_dict = \
         torch.load('weights/pit_b_820.pth', map_location='cpu')
         model.load_state_dict(state_dict)
