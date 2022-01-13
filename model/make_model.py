@@ -7,7 +7,7 @@ import copy
 # from .backbones.vit_pytorch import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
 from .backbones.pit import *
 from loss.metric_learning import Arcface, Cosface, AMSoftmax, CircleLoss
-from einops import rearrange
+from einops import rearrange, repeat
 
 def shuffle_unit(features, shift, group, begin=1):
 
@@ -225,7 +225,10 @@ class YYXBlock(nn.Module):
 
     def forward(self, x1, x2):
         # x1 = self.linear1(x1)
+        x = self.linear2(x1)
+        x = repeat(x, "b c w -> b (r c) w", r=3)
         x2 = self.linear1(x2)
+        x2 = x2 + x
         # x = torch.cat((x1, x2), dim=1)
         x2 = self.linear3(x2)
         x = torch.cat((x1, x2), dim=1)
@@ -329,10 +332,10 @@ class build_transformer_local(nn.Module):
         self.divide_length = cfg.MODEL.DEVIDE_LENGTH
         print('using divide_length size:{}'.format(self.divide_length))
         self.rearrange = rearrange
-        self.yyx1 = YYXBlock(768)
-        self.yyx2 = YYXBlock(768)
-        self.yyx3 = YYXBlock(768)
-        self.yyx4 = YYXBlock(768)
+        self.yyx1 = YYXBlock(1024)
+        self.yyx2 = YYXBlock(1024)
+        self.yyx3 = YYXBlock(1024)
+        self.yyx4 = YYXBlock(1024)
 
     def forward(self, x, label=None, cam_label= None, view_label=None):  # label is unused if self.cos_layer == 'no'
 
@@ -353,7 +356,8 @@ class build_transformer_local(nn.Module):
         if self.rearrange:
             x = shuffle_unit(features, self.shift_num, self.shuffle_groups)
             # lf_1
-            b1_local_feat = x[:, :patch_length]
+            # b1_local_feat = x[:, :patch_length]
+            b1_local_feat = self.yyx1(x[:, :patch_length], x[:, patch_length:patch_length * 4])
             h = int(math.sqrt(b1_local_feat.shape[1]))
             b1_local_feat = rearrange(b1_local_feat, "b (h w) c -> b c h w", h=h, w=h)
             # b1_local_feat = self.b2(torch.cat((token, b1_local_feat), dim=1))
@@ -361,7 +365,10 @@ class build_transformer_local(nn.Module):
             _, b1_local_feat = self.b2(b1_local_feat, token)
             local_feat_1 = self.b2_norm(b1_local_feat)
             # lf_2
-            b2_local_feat = x[:, patch_length:patch_length*2]
+            # b2_local_feat = x[:, patch_length:patch_length*2]
+            b2_local_feat = self.yyx2(x[:, patch_length:patch_length * 2],
+                                      torch.cat((x[:, :patch_length], x[:, patch_length * 2:patch_length * 4]), dim=1))
+
             b2_local_feat = rearrange(b2_local_feat, "b (h w) c -> b c h w", h=h, w=h)
             # b2_local_feat = self.b2(torch.cat((token, b2_local_feat), dim=1))
             # local_feat_2 = b2_local_feat[:, 0]
@@ -369,7 +376,10 @@ class build_transformer_local(nn.Module):
             local_feat_2 = self.b2_norm(b2_local_feat)
 
             # lf_3
-            b3_local_feat = x[:, patch_length*2:patch_length*3]
+            # b3_local_feat = x[:, patch_length*2:patch_length*3]
+            b3_local_feat = self.yyx2(x[:, patch_length * 2:patch_length * 3],
+                                      torch.cat((x[:, :patch_length * 2], x[:, patch_length * 3:patch_length * 4]),
+                                                dim=1))
             b3_local_feat = rearrange(b3_local_feat, "b (h w) c -> b c h w", h=h, w=h)
             # b3_local_feat = self.b2(torch.cat((token, b3_local_feat), dim=1))
             # local_feat_3 = b3_local_feat[:, 0]
@@ -377,7 +387,8 @@ class build_transformer_local(nn.Module):
             local_feat_3 = self.b2_norm(b3_local_feat)
 
             # lf_4
-            b4_local_feat = x[:, patch_length*3:patch_length*4]
+            # b4_local_feat = x[:, patch_length*3:patch_length*4]
+            b4_local_feat = self.yyx2(x[:, patch_length * 3:patch_length * 4], x[:, :patch_length * 3])
             b4_local_feat = rearrange(b4_local_feat, "b (h w) c -> b c h w", h=h, w=h)
             # b4_local_feat = self.b2(torch.cat((token, b4_local_feat), dim=1))
             # local_feat_4 = b4_local_feat[:, 0]

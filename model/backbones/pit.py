@@ -51,19 +51,53 @@ class Transformer(nn.Module):
         return x, cls_tokens
 
 
+# class conv_head_pooling(nn.Module):
+#     def __init__(self, in_feature, out_feature, stride,
+#                  padding_mode='zeros'):
+#         super(conv_head_pooling, self).__init__()
+#
+#         self.conv = nn.Conv2d(in_feature, out_feature, kernel_size=stride + 1,
+#                               padding=stride // 2, stride=stride,
+#                               padding_mode=padding_mode, groups=in_feature)
+#         self.fc = nn.Linear(in_feature, out_feature)
+#
+#     def forward(self, x, cls_token):
+#
+#         x = self.conv(x)
+#         cls_token = self.fc(cls_token)
+#
+#         return x, cls_token
+
+
 class conv_head_pooling(nn.Module):
     def __init__(self, in_feature, out_feature, stride,
                  padding_mode='zeros'):
         super(conv_head_pooling, self).__init__()
+        self.maxpool = nn.MaxPool2d(3, 2, 1)
+        self.avgpool = nn.AvgPool2d(3, 2, 1)
+        self.conv1 = nn.Conv2d(in_feature, out_feature, 1, 1)
+        self.conv2 = nn.Conv2d(in_feature, out_feature, 1, 1)
+        self.conv3 = nn.Conv2d(2*out_feature, out_feature, 1, 1)
 
-        self.conv = nn.Conv2d(in_feature, out_feature, kernel_size=stride + 1,
-                              padding=stride // 2, stride=stride,
-                              padding_mode=padding_mode, groups=in_feature)
+        # self.conv = nn.Conv2d(in_feature, out_feature, kernel_size=stride + 1,
+        #                       padding=stride // 2, stride=stride,
+        #                       padding_mode=padding_mode, groups=in_feature)
         self.fc = nn.Linear(in_feature, out_feature)
 
     def forward(self, x, cls_token):
+        max = self.maxpool(x)
+        min = -self.maxpool(-x)
+        avg = self.avgpool(x)
+        avg = avg - max - min
 
-        x = self.conv(x)
+        max_2 = self.conv1(max)
+        avg_2 = self.conv2(max)
+
+        x = torch.cat([avg_2, max_2], dim=1)
+        x = self.conv3(x)
+        x = x + max_2
+
+        # x = self.conv(x)
         cls_token = self.fc(cls_token)
 
         return x, cls_token
@@ -211,6 +245,15 @@ class DistilledPoolingTransformer(PoolingTransformer):
         else:
             return (x_cls + x_dist) / 2
 
+
+def intersect_dicts(da, db, exclude=()):
+    # Dictionary intersection of matching keys and shapes, omitting 'exclude' keys, using da values
+    # for k, v in da.items():
+    #     if k in db:
+    #         print(k)
+    return {k: v for k, v in da.items() if k in db and not "pools" in k}
+
+
 @register_model
 def pit_b(pretrained, **kwargs):
     model = PoolingTransformer(
@@ -227,7 +270,8 @@ def pit_b(pretrained, **kwargs):
         print("pretrained:pit_b")
         state_dict = \
         torch.load('weights/pit_b_820.pth', map_location='cpu')
-        model.load_state_dict(state_dict)
+        state_dict = intersect_dicts(state_dict, model.state_dict())
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 @register_model
@@ -364,7 +408,9 @@ def pit_ti_distilled(pretrained, **kwargs):
 
 if __name__ == '__main__':
     model = pit_b(True)
-    print(model.head.in_features)
+    x = torch.randn([1, 3, 224, 224])
+    y = model(x)
+    print(model)
     # x = torch.randn(1, 3, 224, 224)
     # y = model(x)
     # print(y.shape)
