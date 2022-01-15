@@ -356,7 +356,7 @@ class build_transformer_local(nn.Module):
         if self.rearrange:
             x = shuffle_unit(features, self.shift_num, self.shuffle_groups)
             # lf_1
-            # b1_local_feat = x[:, :patch_length]
+            b1_local_feat = x[:, :patch_length]
             b1_local_feat = self.yyx1(x[:, :patch_length], x[:, patch_length:patch_length * 4])
             h = int(math.sqrt(b1_local_feat.shape[1]))
             b1_local_feat = rearrange(b1_local_feat, "b (h w) c -> b c h w", h=h, w=h)
@@ -441,15 +441,15 @@ class build_transformer_local(nn.Module):
                 cls_score_4 = self.classifier_4(local_feat_4_bn)
             return [cls_score, cls_score_1, cls_score_2, cls_score_3,
                         cls_score_4
-                        ], [global_feat, local_feat_1, local_feat_2, local_feat_3,
-                            local_feat_4]  # global feature for triplet loss
+                        ], [feat, local_feat_1_bn, local_feat_2_bn, local_feat_3_bn,
+                            local_feat_4_bn]  # global feature for triplet loss
         else:
             if self.neck_feat == 'after':
                 return torch.cat(
                     [feat, local_feat_1_bn / 4, local_feat_2_bn / 4, local_feat_3_bn / 4, local_feat_4_bn / 4], dim=1)
             else:
                 return torch.cat(
-                    [global_feat, local_feat_1 / 4, local_feat_2 / 4, local_feat_3 / 4, local_feat_4 / 4], dim=1)
+                    [global_feat, local_feat_1_bn / 4, local_feat_2_bn / 4, local_feat_3_bn / 4, local_feat_4_bn / 4], dim=1)
 
     def load_param(self, trained_path):
         param_dict = torch.load(trained_path)
